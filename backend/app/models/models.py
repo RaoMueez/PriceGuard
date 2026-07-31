@@ -73,7 +73,6 @@ class Market(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
 
-    official_rates = relationship("OfficialRate", back_populates="market")
     complaints = relationship("Complaint", back_populates="market")
 
     __table_args__ = (
@@ -86,19 +85,16 @@ class OfficialRate(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     commodity_id = Column(Integer, ForeignKey("commodities.id"), nullable=False)
-    market_id = Column(Integer, ForeignKey("markets.id"), nullable=False)
     price = Column(Float, nullable=False)
     effective_date = Column(Date, nullable=False, default=date.today)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # admin who uploaded
 
     commodity = relationship("Commodity", back_populates="official_rates")
-    market = relationship("Market", back_populates="official_rates")
 
     __table_args__ = (
-        UniqueConstraint("commodity_id", "market_id", "effective_date",
+        UniqueConstraint("commodity_id", "effective_date",
                           name="uq_rate_per_commodity_market_date"),
         Index("ix_rates_commodity_date", "commodity_id", "effective_date"),
-        Index("ix_rates_market_date", "market_id", "effective_date"),
     )
 
 
