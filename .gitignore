@@ -1,0 +1,27 @@
+# Python / FastAPI / AI Engine
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.env
+.env
+
+# Node / React Native
+node_modules/
+.expo/
+npm-debug.log
+yarn-error.log
+
+# Streamlit
+.streamlit/
+
+# AI models & data (usually large/binary — track separately if needed)
+ai_engine/models/*.pkl
+ai_engine/models/*.h5
+*.ipynb_checkpoints
+
+# OS/Editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
