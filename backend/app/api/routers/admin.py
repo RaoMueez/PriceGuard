@@ -35,12 +35,27 @@ def upload_official_rates(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
 
-    required_columns = {"Item Name", "Unit", "Price"}
-    if not required_columns.issubset(set(df.columns)):
+
+    # Normalize column headers: strip whitespace, lowercase for matching
+    df.columns = [str(col).strip() for col in df.columns]
+    column_map = {col.lower(): col for col in df.columns}
+
+    required_columns_lower = {"item name", "unit", "price"}
+    if not required_columns_lower.issubset(set(column_map.keys())):
         raise HTTPException(
             status_code=400,
-            detail=f"File must contain columns: {required_columns}. Found: {list(df.columns)}"
+            detail=f"File must contain columns: Item Name, Unit, Price. Found: {list(df.columns)}"
         )
+
+    # Rename columns to standard names for consistent access below
+    df = df.rename(columns={
+        column_map["item name"]: "Item Name",
+        column_map["unit"]: "Unit",
+        column_map["price"]: "Price",
+    })
+
+    # Also strip whitespace from item name values themselves
+    df["Item Name"] = df["Item Name"].astype(str).str.strip()
 
     today = date.today()
     rates_inserted = 0

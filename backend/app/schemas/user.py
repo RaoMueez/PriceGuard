@@ -23,6 +23,7 @@ class UserResponse(BaseModel):
     phone_number: str | None
     role: UserRole
     is_active: bool
+    is_verified: bool
     created_at: datetime
 
     class Config:
@@ -32,3 +33,12 @@ class UserResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class OTPVerifyRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+
+class MessageResponse(BaseModel):
+    message: str

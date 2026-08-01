@@ -33,6 +33,10 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(Enum(UserRole), default=UserRole.citizen, nullable=False)
     is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    otp = Column(String(6), nullable=True)
+    otp_expiry = Column(DateTime, nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
     complaints = relationship("Complaint", back_populates="user")
