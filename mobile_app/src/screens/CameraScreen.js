@@ -1,10 +1,16 @@
 // src/screens/CameraScreen.js
 
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useAppTheme } from "../context/ThemeContext";
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+// Receipt frame sized for long, narrow thermal/handwritten bills
+const FRAME_WIDTH = SCREEN_WIDTH * 0.76;   // ~65-70% of screen width
+const FRAME_HEIGHT = SCREEN_HEIGHT * 0.70; // ~75-80% of screen height
 
 export default function CameraScreen({ navigation }) {
     const { theme } = useAppTheme();
@@ -49,7 +55,7 @@ export default function CameraScreen({ navigation }) {
             {/* Receipt framing overlay */}
             <View style={styles.overlay} pointerEvents="none">
                 <View style={styles.frameBox} />
-                <Text style={styles.frameLabel}>Align receipt within the frame</Text>
+                <Text style={styles.frameLabel}>Align the full receipt within the frame</Text>
             </View>
 
             {/* Auto-dismissing hint toggle */}
@@ -65,7 +71,7 @@ export default function CameraScreen({ navigation }) {
                 </View>
             )}
 
-            {/* Top back button */}
+            {/* Top close button */}
             <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
                 <Ionicons name="close" size={28} color="#fff" />
             </TouchableOpacity>
@@ -89,8 +95,11 @@ const styles = StyleSheet.create({
 
     overlay: { flex: 1, justifyContent: "center", alignItems: "center" },
     frameBox: {
-        width: "82%", height: "45%",
-        borderWidth: 2.5, borderColor: "#4CAF7D", borderRadius: 16,
+        width: FRAME_WIDTH,
+        height: FRAME_HEIGHT,
+        borderWidth: 2.5,
+        borderColor: "#4CAF7D",
+        borderRadius: 14,
         borderStyle: "dashed",
     },
     frameLabel: {

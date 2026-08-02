@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import users, admin, rates, markets, complaints
+from app.api.routers import users, admin, rates, markets, complaints, ocr_test
 from app.db.session import SessionLocal
 from app.models.models import User, UserRole
 from app.core.security import hash_password
@@ -24,6 +24,7 @@ app.include_router(admin.router)
 app.include_router(rates.router)
 app.include_router(markets.router)
 app.include_router(complaints.router)
+app.include_router(ocr_test.router)
 
 
 @app.on_event("startup")

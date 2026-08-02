@@ -1,5 +1,6 @@
 // src/screens/HomeScreen.js
 
+import AnimatedLogo from "../components/AnimatedLogo";
 import React, { useState, useCallback, useEffect } from "react";
 import {
     View, Text, StyleSheet, TouchableOpacity, ScrollView,
@@ -90,7 +91,7 @@ export default function HomeScreen({ navigation }) {
         >
             <View style={styles.header}>
                 <View>
-                    <Text style={[styles.title, { color: theme.text }]}>PriceGuard</Text>
+                    <AnimatedLogo theme={theme} />
                     <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
                         Know the fair price. Every time.
                     </Text>
