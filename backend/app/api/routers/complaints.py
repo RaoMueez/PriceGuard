@@ -32,9 +32,9 @@ def submit_complaint(
         user_id=current_user.id,
         commodity_id=payload.commodity_id,
         market_id=payload.market_id,
+        shop_name=payload.shop_name,
         reported_price=payload.reported_price,
         receipt_image_url=payload.receipt_image_url,
-        # status defaults to "pending" — AI verification wires in during Phase 4
     )
     db.add(new_complaint)
     db.commit()

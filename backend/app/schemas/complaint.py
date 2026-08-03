@@ -9,6 +9,7 @@ from app.models.models import ComplaintStatus
 class ComplaintCreate(BaseModel):
     commodity_id: int
     market_id: int
+    shop_name: str | None = None
     reported_price: float
     receipt_image_url: str
 
@@ -18,6 +19,7 @@ class ComplaintResponse(BaseModel):
     user_id: UUID
     commodity_id: int
     market_id: int
+    shop_name: str | None
     reported_price: float
     receipt_image_url: str
     status: ComplaintStatus

@@ -1,13 +1,14 @@
 // App.js
 
 import React from "react";
+import { View, ActivityIndicator } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ThemeProvider, useAppTheme } from "./src/context/ThemeContext";
-import { AuthProvider } from "./src/context/AuthContext";
+import { AuthProvider, useAuth } from "./src/context/AuthContext";
 
 import HomeScreen from "./src/screens/HomeScreen";
 import CategoryRatesScreen from "./src/screens/CategoryRatesScreen";
@@ -15,9 +16,20 @@ import CameraScreen from "./src/screens/CameraScreen";
 import ComplaintFormScreen from "./src/screens/ComplaintFormScreen";
 import MyComplaintsScreen from "./src/screens/MyComplaintsScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
+import LoginScreen from "./src/screens/LoginScreen";
+import SignupScreen from "./src/screens/SignupScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+
+function AuthStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Signup" component={SignupScreen} />
+    </Stack.Navigator>
+  );
+}
 
 function HomeStack() {
   return (
@@ -46,10 +58,7 @@ function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.textSecondary,
-        tabBarStyle: {
-          backgroundColor: theme.surface,
-          borderTopColor: theme.border,
-        },
+        tabBarStyle: { backgroundColor: theme.surface, borderTopColor: theme.border },
         tabBarIcon: ({ color, size }) => {
           let iconName;
           if (route.name === "Home") iconName = "home-outline";
@@ -68,10 +77,21 @@ function MainTabs() {
   );
 }
 
-function AppContent() {
+function RootNavigator() {
+  const { token, loading } = useAuth();
+  const { theme } = useAppTheme();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: theme.background }}>
+        <ActivityIndicator size="large" color={theme.primary} />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer>
-      <MainTabs />
+      {token ? <MainTabs /> : <AuthStack />}
     </NavigationContainer>
   );
 }
@@ -80,7 +100,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppContent />
+        <RootNavigator />
       </AuthProvider>
     </ThemeProvider>
   );

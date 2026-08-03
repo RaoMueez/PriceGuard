@@ -110,6 +110,8 @@ class Complaint(Base):
     commodity_id = Column(Integer, ForeignKey("commodities.id"), nullable=False)
     market_id = Column(Integer, ForeignKey("markets.id"), nullable=False)
 
+    shop_name = Column(String(255), nullable=True)
+
     reported_price = Column(Float, nullable=False)          # what the user says they were charged
     receipt_image_url = Column(String(500), nullable=False)
     ai_extracted_price = Column(Float, nullable=True)        # filled in after OCR

@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import pytesseract
 from dotenv import load_dotenv
+from rapidfuzz import fuzz, process as fuzzy_process
 
 load_dotenv()
 
@@ -119,10 +120,10 @@ SYNONYM_DICTIONARY = {
     "Milk": ["milk", "doodh", "دودھ"],
     "Yoghurt": ["yoghurt", "yogurt", "dahi", "دہی"],
 
-    "Chicken (Farm Gate Rate)": ["chicken farm", "farm chicken", "murgha farm", "مرغا فارم"],
-    "Chicken (Processed Rate)": ["chicken processed", "processed chicken", "murgha", "مرغا", "chicken meat"],
-    "Beef Meat": ["beef", "gaye ka gosht", "beef meat", "گائے کا گوشت"],
-    "Mutton": ["mutton", "bakre ka gosht", "بکرے کا گوشت"],
+    "Chicken (Farm Gate Rate)": ["chicken farm", "farm chicken", "murgha farm", "مرغا فارم", "زندہ مرغی", "زندہ چکن"],
+    "Chicken (Processed Rate)": ["chicken processed", "processed chicken", "murgha", "مرغا", "chicken meat", "مرغی", "چکن"],
+    "Beef Meat": ["beef", "gaye ka gosht", "beef meat", "گائے کا گوشت", "بیف", "بڑا گوشت"],
+    "Mutton": ["mutton", "bakre ka gosht", "بکرے کا گوشت", "مٹن", "چھوٹا گوشت"],
 }
 
 
@@ -199,6 +200,251 @@ def process_receipt(image_bytes: bytes, requested_items: list[str]) -> dict:
     processed_image = preprocess_image(image_bytes)
     raw_text = extract_text(processed_image)
     item_prices = find_item_prices(raw_text, requested_items)
+
+    return {
+        "raw_ocr_text": raw_text,
+        "extracted_items": item_prices,
+    }
+
+
+# ============================================================
+# 6. NOTEBOOK LINE REMOVAL (for handwritten receipts)
+# ============================================================
+
+def remove_ruled_lines(image: np.ndarray) -> np.ndarray:
+    """
+    Detects and removes straight ruled lines (any color) using Hough Line
+    Transform, rather than assuming a specific line color.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+
+    lines = cv2.HoughLinesP(
+        edges, 1, np.pi / 180, threshold=100,
+        minLineLength=image.shape[1] * 0.4,  # only long lines (likely ruling, not handwriting strokes)
+        maxLineGap=10
+    )
+
+    mask = np.zeros(gray.shape, dtype=np.uint8)
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            # Only remove near-horizontal or near-vertical lines (actual ruling),
+            # not diagonal strokes that could be handwriting
+            angle = abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
+            if angle < 5 or angle > 175 or (85 < angle < 95):
+                cv2.line(mask, (x1, y1), (x2, y2), 255, 3)
+
+    cleaned = cv2.inpaint(image, mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+    return cleaned
+
+
+def preprocess_handwritten_image(image_bytes: bytes) -> np.ndarray:
+    """
+    Preprocessing pipeline specifically for handwritten notebook-style receipts.
+    Removes ruled lines first, then applies the standard cleanup steps.
+    """
+    np_array = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+
+    if image is None:
+        raise ValueError("Could not decode image. File may be corrupted or not a valid image.")
+
+    # Step 1: Remove blue ruled lines while image is still in color
+    # (color info is needed to detect "blue" — must happen before grayscale)
+    line_free = remove_notebook_lines(image)
+
+    # Step 2: Convert to grayscale
+    gray = cv2.cvtColor(line_free, cv2.COLOR_BGR2GRAY)
+
+    # Step 3: Upscale if small — handwriting benefits even more than print from higher resolution
+    height, width = gray.shape
+    if width < 1200:
+        scale_factor = 1200 / width
+        gray = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+
+    # Step 4: Denoise
+    denoised = cv2.fastNlMeansDenoising(gray, h=12)
+
+    # Step 5: Light blur
+    blurred = cv2.GaussianBlur(denoised, (3, 3), 0)
+
+    # Step 6: Adaptive threshold — larger block size tends to work better for
+    # inconsistent handwriting pressure/ink darkness than printed text
+    thresholded = cv2.adaptiveThreshold(
+        blurred, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=41,
+        C=20
+    )
+
+    return thresholded
+
+
+# ============================================================
+# 7. SPATIAL WORD EXTRACTION (position-aware, for handwritten layout)
+# ============================================================
+
+def extract_words_with_positions(processed_image: np.ndarray) -> list[dict]:
+    """
+    Runs Tesseract in 'data' mode, returning each detected word along with
+    its pixel position (x, y, width, height) and confidence score.
+    """
+    custom_config = r"--oem 3 --psm 11 -l eng+urd"  # PSM 11: sparse text, no assumed layout
+
+    data = pytesseract.image_to_data(
+        processed_image, config=custom_config, output_type=pytesseract.Output.DICT
+    )
+
+    words = []
+    for i in range(len(data["text"])):
+        text = data["text"][i].strip()
+        conf = int(data["conf"][i]) if data["conf"][i] != "-1" else -1
+
+        if text and conf > 20:  # filter out empty/very low-confidence noise
+            words.append({
+                "text": text,
+                "x": data["left"][i],
+                "y": data["top"][i],
+                "width": data["width"][i],
+                "height": data["height"][i],
+                "conf": conf,
+            })
+
+    return words
+
+
+def group_words_into_rows(words: list[dict], y_tolerance: int = 20) -> list[list[dict]]:
+    """
+    Groups detected words into rows based on vertical (y) proximity.
+    Handwriting is rarely perfectly aligned, so words within y_tolerance
+    pixels of each other are treated as being on the same line.
+    """
+    if not words:
+        return []
+
+    # Sort by vertical position first
+    sorted_words = sorted(words, key=lambda w: w["y"])
+
+    rows = []
+    current_row = [sorted_words[0]]
+    current_y = sorted_words[0]["y"]
+
+    for word in sorted_words[1:]:
+        if abs(word["y"] - current_y) <= y_tolerance:
+            current_row.append(word)
+        else:
+            rows.append(current_row)
+            current_row = [word]
+            current_y = word["y"]
+
+    rows.append(current_row)
+
+    # Within each row, sort words left-to-right for readability
+    for row in rows:
+        row.sort(key=lambda w: w["x"])
+
+    return rows
+
+
+def split_row_left_right(row: list[dict], image_width: int) -> tuple[str, str]:
+    """
+    Splits a row's words into 'left side' (expected: price/numbers) and
+    'right side' (expected: item name), based on the horizontal midpoint.
+    Returns (left_text, right_text).
+    """
+    midpoint = image_width / 2
+
+    left_words = [w["text"] for w in row if (w["x"] + w["width"] / 2) < midpoint]
+    right_words = [w["text"] for w in row if (w["x"] + w["width"] / 2) >= midpoint]
+
+    return " ".join(left_words), " ".join(right_words)
+
+
+# ============================================================
+# 8. FUZZY MATCHING + PRICE EXTRACTION FOR HANDWRITTEN ROWS
+# ============================================================
+
+def extract_number_from_text(text: str) -> float | None:
+    """Extracts the first plausible number from a text fragment."""
+    matches = PRICE_PATTERN.findall(text)
+    if matches:
+        try:
+            return float(matches[0].replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def find_item_prices_handwritten(
+    processed_image: np.ndarray,
+    requested_items: list[str],
+    fuzzy_threshold: int = 65,
+) -> dict:
+    """
+    Full spatial + fuzzy-matching pipeline for handwritten, unstructured receipts.
+
+    For each requested item:
+      1. Build the full list of known synonyms.
+      2. Look through every row's right-side text, fuzzy-matching against synonyms.
+      3. If a good enough match is found, extract the price from that row's left-side text.
+    """
+    image_width = processed_image.shape[1]
+
+    words = extract_words_with_positions(processed_image)
+    rows = group_words_into_rows(words, y_tolerance=25)
+
+    # Precompute left/right split for every row once
+    row_splits = [split_row_left_right(row, image_width) for row in rows]
+
+    results = {}
+
+    for item_name in requested_items:
+        synonyms = SYNONYM_DICTIONARY.get(item_name, [item_name.lower()])
+        best_price = None
+        best_match_score = 0
+        best_matched_text = None
+
+        for left_text, right_text in row_splits:
+            if not right_text.strip():
+                continue
+
+            # Compare the right-side text against every synonym, take the best score
+            match = fuzzy_process.extractOne(
+                right_text.lower(), synonyms, scorer=fuzz.partial_ratio
+            )
+
+            if match and match[1] >= fuzzy_threshold and match[1] > best_match_score:
+                price = extract_number_from_text(left_text)
+                if price is not None:
+                    best_match_score = match[1]
+                    best_price = price
+                    best_matched_text = f"left='{left_text}' | right='{right_text}'"
+
+        results[item_name] = {
+            "price": best_price,
+            "matched_line": best_matched_text,
+            "confidence_score": best_match_score if best_price else None,
+        }
+
+    return results
+
+
+# ============================================================
+# 9. FULL HANDWRITTEN PIPELINE (convenience function)
+# ============================================================
+
+def process_handwritten_receipt(image_bytes: bytes, requested_items: list[str]) -> dict:
+    """
+    Full pipeline for handwritten/unstructured receipts:
+    line removal -> preprocessing -> spatial OCR -> fuzzy item/price matching.
+    """
+    processed_image = preprocess_handwritten_image(image_bytes)
+    item_prices = find_item_prices_handwritten(processed_image, requested_items)
+
+    # Also return raw text for debugging/inspection purposes
+    raw_text = extract_text(processed_image)
 
     return {
         "raw_ocr_text": raw_text,
