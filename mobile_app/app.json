@@ -10,6 +10,12 @@
           "cameraPermission": "PriceGuard needs camera access to let you capture receipts for complaints."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "PriceGuard needs your location to verify complaints were filed near the reported market."
+        }
+      ],
       "expo-font"
     ],
     "name": "mobile_app",

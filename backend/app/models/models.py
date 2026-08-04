@@ -21,6 +21,12 @@ class ComplaintStatus(str, enum.Enum):
     pending = "pending"
     verified = "verified"
     dismissed = "dismissed"
+    auto_rejected_no_overpricing = "Auto-Rejected: No Overpricing"
+    auto_rejected_invalid_image = "Auto-Rejected: Invalid Receipt Image"
+    suspicious_price_mismatch = "Suspicious: Price Mismatch"
+    pending_manual_review_handwritten = "Pending Manual Review (Handwritten)"
+    suspicious_location_mismatch = "Suspicious: Location Mismatch"
+    potential_coordinated_attack = "Potential Coordinated Attack"
 
 
 class User(Base):
@@ -113,11 +119,24 @@ class Complaint(Base):
     shop_name = Column(String(255), nullable=True)
 
     reported_price = Column(Float, nullable=False)          # what the user says they were charged
+    official_price_at_submission = Column(Float, nullable=True)
     receipt_image_url = Column(String(500), nullable=False)
     ai_extracted_price = Column(Float, nullable=True)        # filled in after OCR
     ai_confidence = Column(Float, nullable=True)              # optional: OCR/anomaly confidence score
 
-    status = Column(Enum(ComplaintStatus), default=ComplaintStatus.pending, nullable=False)
+    # NEW — geo-fencing fields
+    device_latitude = Column(Float, nullable=True)
+    device_longitude = Column(Float, nullable=True)
+    distance_from_market_km = Column(Float, nullable=True)
+
+    # NEW — all triggered flags, comma-separated, for full admin transparency
+    flags = Column(Text, nullable=True)
+
+    status = Column(
+    Enum(ComplaintStatus, values_callable=lambda enum_cls: [e.value for e in enum_cls]),
+    default=ComplaintStatus.pending,
+    nullable=False,
+)
     created_at = Column(DateTime, default=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
 
@@ -128,4 +147,5 @@ class Complaint(Base):
     __table_args__ = (
         Index("ix_complaints_status_date", "status", "created_at"),
         Index("ix_complaints_market_status", "market_id", "status"),
+        Index("ix_complaints_shop_date", "shop_name", "created_at"),  # NEW — speeds up velocity check
     )

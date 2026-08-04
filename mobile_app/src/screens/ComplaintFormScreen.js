@@ -14,7 +14,7 @@ import { extractPriceFromReceipt } from "../services/ocrService";
 
 export default function ComplaintFormScreen({ route, navigation }) {
     const { theme } = useAppTheme();
-    const { imageUri } = route.params;
+    const { imageUri, deviceLatitude, deviceLongitude } = route.params;
 
     const [markets, setMarkets] = useState([]);
     const [commodities, setCommodities] = useState([]);
@@ -85,15 +85,15 @@ export default function ComplaintFormScreen({ route, navigation }) {
                 market_id: selectedMarket.id,
                 shop_name: shopName || null,
                 reported_price: parseFloat(reportedPrice),
-                receipt_image_url: imageUri,
+                imageUri: imageUri,
+                device_latitude: deviceLatitude,
+                device_longitude: deviceLongitude,
             });
 
             Alert.alert("Submitted", "Your complaint has been submitted for review.", [
                 {
                     text: "OK",
-                    onPress: () => {
-                        navigation.navigate("Home", { screen: "HomeMain" });
-                    }
+                    onPress: () => navigation.navigate("Home", { screen: "HomeMain" }),
                 }
             ]);
         } catch (err) {

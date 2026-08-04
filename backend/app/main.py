@@ -7,6 +7,7 @@ from app.api.routers import users, admin, rates, markets, complaints, ocr_test
 from app.db.session import SessionLocal
 from app.models.models import User, UserRole
 from app.core.security import hash_password
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="PriceGuard API", version="1.0.0")
 
@@ -17,6 +18,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/uploads", StaticFiles(directory="app/uploads"), name="uploads")
 
         #--Routers--
 app.include_router(users.router)

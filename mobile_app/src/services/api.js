@@ -81,6 +81,34 @@ const api = {
         });
         return handleResponse(response);
     },
+    
+    // Step 4c :
+    postMultipart: async (path, fields, fileUri, fileFieldName = "file") => {
+        const token = await AsyncStorage.getItem("access_token");
+        const formData = new FormData();
+
+        formData.append(fileFieldName, {
+            uri: fileUri,
+            name: "receipt.jpg",
+            type: "image/jpeg",
+        });
+
+        Object.entries(fields).forEach(([key, value]) => {
+            if (value !== null && value !== undefined) {
+                formData.append(key, String(value));
+            }
+        });
+
+        const headers = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const response = await fetch(`${BASE_URL}${path}`, {
+            method: "POST",
+            headers,
+            body: formData,
+        });
+        return handleResponse(response);
+    },
 };
 
 export default api;

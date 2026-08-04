@@ -15,6 +15,7 @@ def seed_markets():
         {"name": "Itwar Bazar (Sector I-9)", "latitude": 33.6650, "longitude": 73.0836},
         {"name": "Super Market, F-6", "latitude": 33.7255, "longitude": 73.0904},
         {"name": "Jinnah Super Market, F-7", "latitude": 33.7215, "longitude": 73.0654},
+        {"name": "Gulzar-e-Quaid Market, Rawalpindi", "latitude": 33.5769, "longitude": 73.0417},
     ]
 
     for m in markets_data:

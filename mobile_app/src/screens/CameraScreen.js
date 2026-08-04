@@ -5,6 +5,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from "react-nati
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { useAppTheme } from "../context/ThemeContext";
+import * as Location from "expo-location";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -44,7 +45,31 @@ export default function CameraScreen({ navigation }) {
     const handleCapture = async () => {
         if (cameraRef.current) {
             const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
-            navigation.navigate("ComplaintForm", { imageUri: photo.uri });
+
+            // Attempt to capture device location alongside the receipt photo.
+            // If permission is denied or location fails, we still proceed —
+            // the backend treats missing location as "not provided", not suspicious.
+            let latitude = null;
+            let longitude = null;
+
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === "granted") {
+                    const position = await Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.Balanced,
+                    });
+                    latitude = position.coords.latitude;
+                    longitude = position.coords.longitude;
+                }
+            } catch (err) {
+                // Silently proceed without location — non-blocking
+            }
+
+            navigation.navigate("ComplaintForm", {
+                imageUri: photo.uri,
+                deviceLatitude: latitude,
+                deviceLongitude: longitude,
+            });
         }
     };
 

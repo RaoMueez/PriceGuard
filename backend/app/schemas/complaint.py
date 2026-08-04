@@ -6,14 +6,6 @@ from datetime import datetime
 from app.models.models import ComplaintStatus
 
 
-class ComplaintCreate(BaseModel):
-    commodity_id: int
-    market_id: int
-    shop_name: str | None = None
-    reported_price: float
-    receipt_image_url: str
-
-
 class ComplaintResponse(BaseModel):
     id: UUID
     user_id: UUID
@@ -21,7 +13,13 @@ class ComplaintResponse(BaseModel):
     market_id: int
     shop_name: str | None
     reported_price: float
+    official_price_at_submission: float | None
     receipt_image_url: str
+    ai_extracted_price: float | None
+    device_latitude: float | None
+    device_longitude: float | None
+    distance_from_market_km: float | None
+    flags: str | None
     status: ComplaintStatus
     created_at: datetime
 
