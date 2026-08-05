@@ -27,6 +27,7 @@ class ComplaintStatus(str, enum.Enum):
     pending_manual_review_handwritten = "Pending Manual Review (Handwritten)"
     suspicious_location_mismatch = "Suspicious: Location Mismatch"
     potential_coordinated_attack = "Potential Coordinated Attack"
+    suspicious_absurd_price_spam = "Suspicious: Absurd Price Spam" 
 
 
 class User(Base):

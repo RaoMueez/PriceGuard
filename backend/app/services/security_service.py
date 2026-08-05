@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Complaint
 
-MAX_ALLOWED_DISTANCE_KM = 1.0
+MAX_ALLOWED_DISTANCE_KM = 10.0
 VELOCITY_WINDOW_HOURS = 24
 VELOCITY_THRESHOLD = 3  # more than this many reports on the same shop in the window triggers a flag
 
