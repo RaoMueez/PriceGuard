@@ -21,6 +21,7 @@ class ComplaintStatus(str, enum.Enum):
     pending = "pending"
     verified = "verified"
     dismissed = "dismissed"
+    resolved = "Resolved" 
     auto_rejected_no_overpricing = "Auto-Rejected: No Overpricing"
     auto_rejected_invalid_image = "Auto-Rejected: Invalid Receipt Image"
     suspicious_price_mismatch = "Suspicious: Price Mismatch"

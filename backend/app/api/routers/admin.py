@@ -1,15 +1,17 @@
 # app/api/routers/admin.py
 
 import io
-from datetime import date
+from datetime import date, datetime
+from uuid import UUID
 
 import pandas as pd
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import get_db
-from app.models.models import Commodity, OfficialRate, User
+from app.models.models import Commodity, OfficialRate, User, Complaint, Market
 from app.schemas.admin import RateUploadResult
+from app.schemas.complaint import ComplaintAdminResponse, ComplaintStatusUpdate
 from app.api.deps import get_admin_user
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -34,7 +36,6 @@ def upload_official_rates(
             df = pd.read_excel(io.BytesIO(contents))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
-
 
     # Normalize column headers: strip whitespace, lowercase for matching
     df.columns = [str(col).strip() for col in df.columns]
@@ -105,3 +106,84 @@ def upload_official_rates(
         skipped_items=skipped_items,
         effective_date=str(today),
     )
+
+
+def _complaint_to_admin_dict(c: Complaint) -> dict:
+    """Shared serializer so the list and update endpoints stay in sync."""
+    return {
+        "id": c.id,
+        "user_id": c.user_id,
+        "user_email": c.user.email,
+        "commodity_id": c.commodity_id,
+        "commodity_name": c.commodity.name,
+        "market_id": c.market_id,
+        "market_name": c.market.name,
+        "market_latitude": c.market.latitude,
+        "market_longitude": c.market.longitude,
+        "shop_name": c.shop_name,
+        "reported_price": c.reported_price,
+        "official_price_at_submission": c.official_price_at_submission,
+        "receipt_image_url": c.receipt_image_url,
+        "ai_extracted_price": c.ai_extracted_price,
+        "device_latitude": c.device_latitude,
+        "device_longitude": c.device_longitude,
+        "distance_from_market_km": c.distance_from_market_km,
+        "flags": c.flags,
+        "status": c.status,
+        "created_at": c.created_at,
+        "reviewed_at": c.reviewed_at,
+    }
+
+
+@router.get("/complaints", response_model=list[ComplaintAdminResponse])
+def list_complaints(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """
+    Returns all complaints with commodity/market/user info joined in,
+    newest first. Filtering (by status, item, date) is done client-side
+    in the Streamlit dashboard — dataset size for an FYP demo doesn't
+    warrant server-side pagination/filtering yet.
+    """
+    complaints = (
+        db.query(Complaint)
+        .options(
+            joinedload(Complaint.commodity),
+            joinedload(Complaint.market),
+            joinedload(Complaint.user),
+        )
+        .order_by(Complaint.created_at.desc())
+        .all()
+    )
+    return [_complaint_to_admin_dict(c) for c in complaints]
+
+
+@router.patch("/complaints/{complaint_id}", response_model=ComplaintAdminResponse)
+def update_complaint_status(
+    complaint_id: UUID,
+    payload: ComplaintStatusUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    """
+    Admin manually overrides a complaint's status (e.g. after reviewing the
+    receipt image side-by-side with the reported/OCR prices). Sets
+    reviewed_at and appends an audit-trail note to `flags`.
+    """
+    complaint = db.query(Complaint).filter(Complaint.id == complaint_id).first()
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found.")
+
+    if payload.admin_note:
+        existing_flags = complaint.flags.split(",") if complaint.flags else []
+        existing_flags.append(f"admin_action[{admin_user.email}]: {payload.admin_note}")
+        complaint.flags = ",".join(existing_flags)
+
+    complaint.status = payload.status
+    complaint.reviewed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(complaint)
+
+    return _complaint_to_admin_dict(complaint)
