@@ -121,6 +121,9 @@ class Complaint(Base):
     shop_name = Column(String(255), nullable=True)
 
     reported_price = Column(Float, nullable=False)          # what the user says they were charged
+    complaint_type = Column(String, nullable=False, default="overpricing")  # "overpricing" | "short_weight"
+    amount_paid = Column(Float, nullable=True)      # lump sum the citizen actually paid
+    quantity_stated = Column(Float, nullable=True)  # quantity bought (overpricing) or received (short_weight)
     official_price_at_submission = Column(Float, nullable=True)
     receipt_image_url = Column(String(500), nullable=False)
     ai_extracted_price = Column(Float, nullable=True)        # filled in after OCR

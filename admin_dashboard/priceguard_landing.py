@@ -265,6 +265,48 @@ def inject_complaint_selectbox_styling():
     )
 
 
+def inject_commodity_selectbox_unlock():
+    """
+    Explicitly FORCES the commodity dropdown (Market Insights) back to
+    normal typing/search behavior, using its own dedicated marker. This
+    doesn't rely on the lock script "correctly" ignoring this widget —
+    it actively overrides readOnly/cursor/caret on an interval, so even
+    if Streamlit ends up reusing/leaking the lock script's injected
+    component across page switches, this wins for this specific widget.
+    """
+    st.markdown(
+        """
+        <style>
+        #commodity-select-marker + div div[data-baseweb="select"],
+        #commodity-select-marker + div div[data-baseweb="select"] * {
+            cursor: text !important;
+        }
+        #commodity-select-marker + div div[data-baseweb="select"] input {
+            caret-color: auto !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.components.v1.html(
+        """
+        <script>
+        function unlockCommoditySelectbox() {
+            const doc = window.parent.document;
+            const marker = doc.getElementById("commodity-select-marker");
+            if (!marker) return;
+            const wrapper = marker.nextElementSibling;
+            if (!wrapper) return;
+            const input = wrapper.querySelector('div[data-baseweb="select"] input');
+            if (input && input.readOnly) { input.readOnly = false; }
+        }
+        setInterval(unlockCommoditySelectbox, 400);
+        </script>
+        """,
+        height=0,
+    )
+
+
 # ============================================================
 # HEADER / NAV / HERO
 # ============================================================
@@ -786,6 +828,8 @@ def render_predictive_analytics_tab(full_df: pd.DataFrame):
         st.warning("Could not load the model's item list from the backend.")
         return
     default_index = item_options.index("Tomato") if "Tomato" in item_options else 0
+    inject_commodity_selectbox_unlock()
+    st.markdown('<div id="commodity-select-marker"></div>', unsafe_allow_html=True)
     selected_item = st.selectbox("Select a commodity", options=item_options, index=default_index)
 
     forecast_data = fetch_forecast(st.session_state.base_url, selected_item, history_weeks=12)

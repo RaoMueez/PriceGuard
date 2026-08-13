@@ -16,6 +16,8 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from tensorflow import keras
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/forecast", tags=["Forecast"])
 
@@ -51,8 +53,8 @@ try:
     _window_size: int = _config["window_size"]
     _historical_df = pd.read_csv(HISTORICAL_CSV_PATH, parse_dates=["date"])
     _load_error = None
-    print(f"[forecast router] Loaded model, {len(_scalers)} scalers, "
-          f"window_size={_window_size}, {len(_historical_df)} historical rows.")
+    logger.info(f"Loaded model, {len(_scalers)} scalers, "
+            f"window_size={_window_size}, {len(_historical_df)} historical rows.")
 except Exception as e:
     # Don't crash the whole app if artifacts are missing/misplaced — surface
     # a clear error on the endpoint itself instead, so the rest of the API
@@ -64,7 +66,7 @@ except Exception as e:
     _window_size = 8
     _historical_df = pd.DataFrame()
     _load_error = str(e)
-    print(f"[forecast router] WARNING: failed to load forecast artifacts: {_load_error}")
+    logger.error(f"Failed to load forecast artifacts: {_load_error}")
 
 
 # ------------------------------------------------------------------

@@ -343,8 +343,8 @@ def fetch_complaints() -> tuple[bool, str]:
         return True, "No complaints found."
 
     df = pd.DataFrame(data)
-    df["created_at"] = pd.to_datetime(df["created_at"])
-    df["reviewed_at"] = pd.to_datetime(df["reviewed_at"])
+    df["created_at"] = pd.to_datetime(df["created_at"], utc=True).dt.tz_convert("Asia/Karachi")
+    df["reviewed_at"] = pd.to_datetime(df["reviewed_at"], utc=True).dt.tz_convert("Asia/Karachi")
     df["status_category"] = df["status"].apply(categorize_status)
 
     df["map_latitude"] = df["device_latitude"].fillna(df["market_latitude"])
@@ -406,7 +406,7 @@ def render_login():
 
     with st.form("login_form"):
         base_url = st.text_input("Backend URL", value=st.session_state.base_url)
-        email = st.text_input("Admin email", value="admin@priceguard.com")
+        email = st.text_input("Admin email")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Log In", width='stretch')
 

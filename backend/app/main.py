@@ -8,6 +8,8 @@ from app.db.session import SessionLocal
 from app.models.models import User, UserRole
 from app.core.security import hash_password
 from fastapi.staticfiles import StaticFiles
+from app.core.logging_config import setup_logging
+setup_logging()
 
 app = FastAPI(title="PriceGuard API", version="1.0.0")
 

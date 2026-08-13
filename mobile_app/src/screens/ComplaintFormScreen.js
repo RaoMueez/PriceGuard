@@ -12,6 +12,11 @@ import { fetchRates } from "../services/ratesService";
 import { submitComplaint } from "../services/complaintsService";
 import { extractPriceFromReceipt } from "../services/ocrService";
 
+const COMPLAINT_TYPES = [
+    { value: "overpricing", label: "Overpricing", icon: "trending-up-outline" },
+    { value: "short_weight", label: "Short Weight", icon: "scale-outline" },
+];
+
 export default function ComplaintFormScreen({ route, navigation }) {
     const { theme } = useAppTheme();
     const { imageUri, deviceLatitude, deviceLongitude } = route.params;
@@ -21,7 +26,11 @@ export default function ComplaintFormScreen({ route, navigation }) {
     const [selectedMarket, setSelectedMarket] = useState(null);
     const [selectedCommodity, setSelectedCommodity] = useState(null);
     const [shopName, setShopName] = useState("");
-    const [reportedPrice, setReportedPrice] = useState("");
+
+    const [complaintType, setComplaintType] = useState("overpricing");
+    const [amountPaid, setAmountPaid] = useState("");
+    const [quantity, setQuantity] = useState("");
+
     const [marketModalVisible, setMarketModalVisible] = useState(false);
     const [commodityModalVisible, setCommodityModalVisible] = useState(false);
     const [marketSearch, setMarketSearch] = useState("");
@@ -59,22 +68,41 @@ export default function ComplaintFormScreen({ route, navigation }) {
         setSelectedCommodity(commodity);
         setCommodityModalVisible(false);
         setCommoditySearch("");
-        setReportedPrice("");
+        setAmountPaid("");
         setOcrStatus("detecting");
 
+        // OCR can only ever read what's actually printed on the receipt —
+        // the total amount charged. It has no way to know the fractional
+        // quantity the user is separately reporting, so it only ever
+        // pre-fills Amount Paid, never Quantity.
         const result = await extractPriceFromReceipt(imageUri, commodity.name);
 
         if (result.auto_detected && result.price !== null && result.price !== undefined) {
-            setReportedPrice(String(result.price));
+            setAmountPaid(String(result.price));
             setOcrStatus("detected");
         } else {
             setOcrStatus("manual");
         }
     };
 
+    // Live-calculated effective per-unit price, shown as a hint while
+    // typing — lets the user see the violation forming before they submit.
+    const effectivePricePerUnit = (() => {
+        const paid = parseFloat(amountPaid);
+        const qty = parseFloat(quantity);
+        if (!paid || !qty || qty <= 0) return null;
+        return (paid / qty).toFixed(2);
+    })();
+
     const handleSubmit = async () => {
-        if (!selectedMarket || !selectedCommodity || !reportedPrice) {
+        if (!selectedMarket || !selectedCommodity || !amountPaid || !quantity) {
             Alert.alert("Missing information", "Please fill in all fields before submitting.");
+            return;
+        }
+
+        const qtyValue = parseFloat(quantity);
+        if (isNaN(qtyValue) || qtyValue < 0.01) {
+            Alert.alert("Invalid quantity", "Please enter a realistic quantity (at least 0.01).");
             return;
         }
 
@@ -84,7 +112,9 @@ export default function ComplaintFormScreen({ route, navigation }) {
                 commodity_id: selectedCommodity.commodity_id,
                 market_id: selectedMarket.id,
                 shop_name: shopName || null,
-                reported_price: parseFloat(reportedPrice),
+                complaint_type: complaintType,
+                amount_paid: parseFloat(amountPaid),
+                quantity: qtyValue,
                 imageUri: imageUri,
                 device_latitude: deviceLatitude,
                 device_longitude: deviceLongitude,
@@ -108,7 +138,7 @@ export default function ComplaintFormScreen({ route, navigation }) {
             return (
                 <View style={styles.ocrStatusRow}>
                     <ActivityIndicator size="small" color={theme.primary} />
-                    <Text style={[styles.ocrStatusText, { color: theme.textSecondary }]}>Scanning receipt for price...</Text>
+                    <Text style={[styles.ocrStatusText, { color: theme.textSecondary }]}>Scanning receipt for amount paid...</Text>
                 </View>
             );
         }
@@ -117,7 +147,7 @@ export default function ComplaintFormScreen({ route, navigation }) {
                 <View style={styles.ocrStatusRow}>
                     <Ionicons name="checkmark-circle" size={16} color={theme.primary} />
                     <Text style={[styles.ocrStatusText, { color: theme.primary }]}>
-                        Price auto-detected — please verify it's correct
+                        Amount auto-detected — please verify it's correct
                     </Text>
                 </View>
             );
@@ -127,7 +157,7 @@ export default function ComplaintFormScreen({ route, navigation }) {
                 <View style={styles.ocrStatusRow}>
                     <Ionicons name="create-outline" size={16} color={theme.accent} />
                     <Text style={[styles.ocrStatusText, { color: theme.accent }]}>
-                        Couldn't auto-read the price — please enter it manually
+                        Couldn't auto-read the amount — please enter it manually
                     </Text>
                 </View>
             );
@@ -135,16 +165,50 @@ export default function ComplaintFormScreen({ route, navigation }) {
         return null;
     };
 
+    const quantityLabel = complaintType === "short_weight"
+        ? `QUANTITY YOU ACTUALLY RECEIVED (${selectedCommodity?.unit || "kg"})`
+        : `QUANTITY YOU BOUGHT (${selectedCommodity?.unit || "kg"})`;
+
+    const quantityPlaceholder = complaintType === "short_weight"
+        ? "e.g., 0.6"
+        : "e.g., 0.5";
+
     return (
         <ScrollView style={[styles.container, { backgroundColor: theme.background }]}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.title, { color: theme.text }]}>Report Overpricing</Text>
+                <Text style={[styles.title, { color: theme.text }]}>Report an Issue</Text>
             </View>
 
             <Image source={{ uri: imageUri }} style={styles.receiptImage} />
+
+            {/* ---------------- COMPLAINT TYPE ---------------- */}
+            <Text style={[styles.label, { color: theme.textSecondary }]}>WHAT WENT WRONG?</Text>
+            <View style={styles.typeRow}>
+                {COMPLAINT_TYPES.map((t) => {
+                    const active = complaintType === t.value;
+                    return (
+                        <TouchableOpacity
+                            key={t.value}
+                            style={[
+                                styles.typeButton,
+                                {
+                                    backgroundColor: active ? theme.primary : theme.surface,
+                                    borderColor: active ? theme.primary : theme.border,
+                                },
+                            ]}
+                            onPress={() => setComplaintType(t.value)}
+                        >
+                            <Ionicons name={t.icon} size={16} color={active ? "#fff" : theme.textSecondary} />
+                            <Text style={{ color: active ? "#fff" : theme.text, marginLeft: 6, fontWeight: "600" }}>
+                                {t.label}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
 
             <Text style={[styles.label, { color: theme.textSecondary }]}>MARKET</Text>
             <TouchableOpacity
@@ -183,22 +247,57 @@ export default function ComplaintFormScreen({ route, navigation }) {
                 </Text>
             )}
 
-            <Text style={[styles.label, { color: theme.textSecondary }]}>PRICE YOU WERE CHARGED</Text>
-
+            {/* ---------------- AMOUNT PAID ---------------- */}
+            <Text style={[styles.label, { color: theme.textSecondary }]}>AMOUNT PAID (Rs.)</Text>
             {renderOcrStatus()}
-
             <TextInput
                 style={[styles.input, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
-                placeholder="e.g., 180"
+                placeholder="e.g., 210"
                 placeholderTextColor={theme.textSecondary}
                 keyboardType="numeric"
-                value={reportedPrice}
+                value={amountPaid}
                 onChangeText={(text) => {
-                    setReportedPrice(text);
+                    setAmountPaid(text);
                     if (ocrStatus === "detected") setOcrStatus("manual");
                 }}
                 editable={!!selectedCommodity && ocrStatus !== "detecting"}
             />
+
+            {/* ---------------- QUANTITY ---------------- */}
+            <Text style={[styles.label, { color: theme.textSecondary }]}>{quantityLabel}</Text>
+            <TextInput
+                style={[styles.input, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
+                placeholder={quantityPlaceholder}
+                placeholderTextColor={theme.textSecondary}
+                keyboardType="decimal-pad"
+                value={quantity}
+                onChangeText={setQuantity}
+                editable={!!selectedCommodity}
+            />
+
+            {/* ---------------- LIVE EFFECTIVE-PRICE HINT ---------------- */}
+            {effectivePricePerUnit && selectedCommodity?.price && (
+                <View
+                    style={[
+                        styles.hintBox,
+                        {
+                            backgroundColor: parseFloat(effectivePricePerUnit) > selectedCommodity.price
+                                ? "rgba(220,38,38,0.1)"
+                                : "rgba(34,197,94,0.1)",
+                        },
+                    ]}
+                >
+                    <Text
+                        style={{
+                            color: parseFloat(effectivePricePerUnit) > selectedCommodity.price ? "#DC2626" : "#16A34A",
+                            fontWeight: "600",
+                            fontSize: 13,
+                        }}
+                    >
+                        ≈ Rs. {effectivePricePerUnit}/{selectedCommodity.unit} — official rate is Rs. {selectedCommodity.price}/{selectedCommodity.unit}
+                    </Text>
+                </View>
+            )}
 
             <TouchableOpacity
                 style={[styles.submitButton, { backgroundColor: theme.primary, opacity: submitting ? 0.6 : 1 }]}
@@ -286,6 +385,15 @@ const styles = StyleSheet.create({
     ocrStatusRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
     ocrStatusText: { fontSize: 12, flex: 1 },
     input: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
+
+    typeRow: { flexDirection: "row", gap: 10 },
+    typeButton: {
+        flexDirection: "row", alignItems: "center", justifyContent: "center",
+        flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1,
+    },
+
+    hintBox: { padding: 12, borderRadius: 10, marginTop: 4, marginBottom: 6 },
+
     submitButton: { padding: 16, borderRadius: 12, alignItems: "center", marginTop: 24, marginBottom: 40 },
     submitButtonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
     modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },

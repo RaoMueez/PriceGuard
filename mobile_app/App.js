@@ -14,8 +14,10 @@ import HomeScreen from "./src/screens/HomeScreen";
 import CategoryRatesScreen from "./src/screens/CategoryRatesScreen";
 import CameraScreen from "./src/screens/CameraScreen";
 import ComplaintFormScreen from "./src/screens/ComplaintFormScreen";
-import MyComplaintsScreen from "./src/screens/MyComplaintsScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
+import EditProfileScreen from "./src/screens/EditProfileScreen";
+import TermsScreen from "./src/screens/TermsScreen";
+import AboutScreen from "./src/screens/AboutScreen";
 import LoginScreen from "./src/screens/LoginScreen";
 import SignupScreen from "./src/screens/SignupScreen";
 
@@ -49,6 +51,22 @@ function ComplaintStack() {
   );
 }
 
+// NEW — wraps SettingsScreen plus the three screens it navigates to
+// (EditProfile, Terms, About), matching the same nested-stack pattern
+// already used by HomeStack and ComplaintStack. headerShown stays false,
+// consistent with the rest of the app — each of these three screens
+// renders its own custom back button instead of relying on a native header.
+function SettingsStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="SettingsMain" component={SettingsScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="Terms" component={TermsScreen} />
+      <Stack.Screen name="About" component={AboutScreen} />
+    </Stack.Navigator>
+  );
+}
+
 function MainTabs() {
   const { theme } = useAppTheme();
 
@@ -63,7 +81,6 @@ function MainTabs() {
           let iconName;
           if (route.name === "Home") iconName = "home-outline";
           else if (route.name === "Report") iconName = "camera-outline";
-          else if (route.name === "My Reports") iconName = "document-text-outline";
           else if (route.name === "Settings") iconName = "settings-outline";
           return <Ionicons name={iconName} size={size} color={color} />;
         },
@@ -71,8 +88,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Home" component={HomeStack} />
       <Tab.Screen name="Report" component={ComplaintStack} />
-      <Tab.Screen name="My Reports" component={MyComplaintsScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+      <Tab.Screen name="Settings" component={SettingsStack} />
     </Tab.Navigator>
   );
 }

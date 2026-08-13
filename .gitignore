@@ -25,3 +25,5 @@ ai_engine/models/*.h5
 Thumbs.db
 .vscode/
 .idea/
+
+backend/app/uploads/

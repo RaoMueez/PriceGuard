@@ -1,9 +1,11 @@
 // src/screens/SignupScreen.js
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
 import { useAppTheme } from "../context/ThemeContext";
-import { BASE_URL } from "../services/api";
+import { BASE_URL, extractErrorMessage } from "../services/api";
+
+const OTP_COUNTDOWN_SECONDS = 180; // 3 minutes — must match backend OTP_EXPIRY_SECONDS
 
 export default function SignupScreen({ navigation }) {
     const { theme } = useAppTheme();
@@ -12,8 +14,42 @@ export default function SignupScreen({ navigation }) {
     const [phone, setPhone] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
+    const [resending, setResending] = useState(false);
     const [otpMode, setOtpMode] = useState(false);
     const [otp, setOtp] = useState("");
+    const [secondsLeft, setSecondsLeft] = useState(0);
+
+    const intervalRef = useRef(null);
+
+    const startCountdown = () => {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        setSecondsLeft(OTP_COUNTDOWN_SECONDS);
+        intervalRef.current = setInterval(() => {
+            setSecondsLeft((prev) => {
+                if (prev <= 1) {
+                    clearInterval(intervalRef.current);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    };
+
+    // Starts the countdown the moment the screen switches into OTP mode
+    // (right after a successful signup call below), and cleans up the
+    // interval on unmount so it doesn't keep ticking in the background.
+    useEffect(() => {
+        if (otpMode) startCountdown();
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, [otpMode]);
+
+    const formatTime = (totalSeconds) => {
+        const m = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+        const s = (totalSeconds % 60).toString().padStart(2, "0");
+        return `${m}:${s}`;
+    };
 
     const handleSignup = async () => {
         if (!fullName || !email || !password) {
@@ -37,7 +73,7 @@ export default function SignupScreen({ navigation }) {
             const data = await response.json();
 
             if (!response.ok) {
-                Alert.alert("Signup failed", data.detail || "Something went wrong.");
+                Alert.alert("Signup failed", extractErrorMessage(data));
                 return;
             }
 
@@ -67,7 +103,7 @@ export default function SignupScreen({ navigation }) {
             const data = await response.json();
 
             if (!response.ok) {
-                Alert.alert("Verification failed", data.detail || "Invalid or expired code.");
+                Alert.alert("Verification failed", extractErrorMessage(data));
                 return;
             }
 
@@ -78,6 +114,34 @@ export default function SignupScreen({ navigation }) {
             Alert.alert("Error", "Could not connect to the server.");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResendOtp = async () => {
+        if (secondsLeft > 0 || resending) return; // guard against the disabled state being bypassed
+
+        setResending(true);
+        try {
+            const response = await fetch(`${BASE_URL}/api/users/resend-otp`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                Alert.alert("Couldn't resend", extractErrorMessage(data));
+                return;
+            }
+
+            setOtp("");
+            startCountdown();
+            Alert.alert("Code sent", "A new verification code has been sent to your email.");
+        } catch (err) {
+            Alert.alert("Error", "Could not connect to the server.");
+        } finally {
+            setResending(false);
         }
     };
 
@@ -150,6 +214,24 @@ export default function SignupScreen({ navigation }) {
                     >
                         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify</Text>}
                     </TouchableOpacity>
+
+                    <View style={styles.resendRow}>
+                        {secondsLeft > 0 ? (
+                            <Text style={{ color: theme.textSecondary, fontSize: 13 }}>
+                                Resend OTP in {formatTime(secondsLeft)}
+                            </Text>
+                        ) : (
+                            <TouchableOpacity onPress={handleResendOtp} disabled={resending}>
+                                {resending ? (
+                                    <ActivityIndicator size="small" color={theme.primary} />
+                                ) : (
+                                    <Text style={{ color: theme.primary, fontSize: 13, fontWeight: "700" }}>
+                                        Resend OTP
+                                    </Text>
+                                )}
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 </>
             )}
 
@@ -166,4 +248,5 @@ const styles = StyleSheet.create({
     input: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 14 },
     button: { padding: 16, borderRadius: 12, alignItems: "center", marginTop: 8 },
     buttonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+    resendRow: { alignItems: "center", marginTop: 16 },
 });

@@ -26,6 +26,23 @@ class ComplaintResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class MyComplaintResponse(BaseModel):
+    id: UUID
+    commodity_name: str
+    unit: str
+    market_name: str
+    shop_name: str | None
+    reported_price: float
+    official_price_at_submission: float | None
+    ai_extracted_price: float | None
+    receipt_image_url: str
+    flags: str | None
+    status: ComplaintStatus
+    created_at: datetime
+ 
+    class Config:
+        from_attributes = True
+
 
 class ComplaintAdminResponse(BaseModel):
     """

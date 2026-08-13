@@ -1,65 +1,118 @@
-# Phase 1: Database Schema & Setup
-**Date:** 2026-07-31
-**Status:** Completed
-**Module:** Database
-**Next Phase:** [[Phase 2 - FastAPI Core & Admin Setup]]
+# PriceGuard
 
-## 🎯 Objectives
-1. Design a highly normalized and scalable database schema for the PriceGuard system.
-2. Ensure the schema supports location-based queries (for the Admin Heatmap) and historical price tracking.
-3. Categorize commodities effectively for the mobile app interface (Vegetables, Fruits, Dairy, Poultry & Meat).
-4. Deploy the schema to a cloud-based PostgreSQL environment for seamless collaboration.
+**PriceGuard** is an AI-powered market price transparency system for Pakistan. Citizens report suspected overpricing and short-weighing by submitting a receipt photo, a price, and their location. Each report is automatically checked for authenticity (GPS geo-fencing, OpenCV receipt validation, OCR price cross-checking) before being routed to administrators for review. A predictive analytics module forecasts near-term commodity prices and flags reports that deviate sharply from expected trends — a signal consistent with hoarding-driven price hikes.
 
-## 🛠️ Tech Stack & Infrastructure
-- **Database Engine:** PostgreSQL
-- **Hosting:** Neon (Serverless, Cloud-based)
-  - *Storage:* 500 MB (Sufficient, as we store image URLs, not raw image files).
-  - *Compute:* Shared vCPU, wakes up on API requests.
-- **ORM:** SQLAlchemy (Python)
+Built as a Final Year Project.
 
-## 🗄️ Core Tables & Relationships
-- **Users:** Manages authentication and roles (`citizen`, `admin`).
-- **Categories & Commodities:** One-to-Many relationship. Contains seed data for daily-use items.
-- **Markets/Zones:** Stores `latitude` and `longitude` which is critical for mapping green/red zones on the Streamlit dashboard.
-- **Official_Rates:** Connects `commodity_id` and `market_id`.
-- **Complaints:** Connects users to the issues they report. Stores `receipt_image_url` and `ai_extracted_price`.
+## Features
 
-## 📝 Key Architectural Decisions
-- **Rate History Logic:** We avoided creating a redundant `rate_history` table. Instead, history is maintained natively within the `Official_Rates` table using the `effective_date` column.
-- **Image Storage Strategy:** To preserve the 500 MB Neon database limit, actual receipt images will be uploaded to a cloud storage bucket (e.g., Cloudinary/AWS), and only their string URLs (`receipt_image_url`) are saved in the database.
-- **Indexing:** Applied database indexes on `effective_date` and `market_id` to ensure fast data retrieval when generating heatmaps.
+- **Citizen mobile app** — submit reports with a receipt photo, GPS-verified location, and support for fractional purchases and short-weight complaints
+- **Automated fraud pipeline** — GPS geo-fencing, OpenCV-based receipt authenticity checks, OCR price verification, submission velocity tracking (anti-spam)
+- **Admin dashboard** — review and action reports, geospatial complaint map, LSTM-based price forecasting, automated hoarding alerts
+- **Predictive analytics** — LSTM model trained across all tracked commodities, forecasting near-term prices and flagging abnormal deviations
 
----
+## Tech Stack
 
-# Phase 2: FastAPI Core & Admin Setup
-**Date:** 2026-07-31
-**Status:** In Progress
-**Module:** Backend
-**Previous Phase:** [[Phase 1 - Database Schema]]
+| Layer | Technology |
+|---|---|
+| Backend API | FastAPI, SQLAlchemy, Pydantic |
+| Database | PostgreSQL (hosted on Neon) |
+| Admin Dashboard | Streamlit |
+| Predictive Analytics | TensorFlow/Keras (LSTM), scikit-learn |
+| Mobile App | React Native (Expo) |
+| Auth | JWT (python-jose), bcrypt |
+| Computer Vision / OCR | OpenCV, Tesseract |
 
-## 🎯 Objectives
-1. Set up the core FastAPI application structure.
-2. Implement secure User Authentication (Signup/Login) using JWT.
-3. Establish Role-Based Access Control (RBAC) to differentiate between `citizen` and `admin`.
-4. Create an endpoint for Admins to upload daily commodity rates via CSV/Excel.
+## Project Structure
 
-## 🛠️ Tech Stack & Libraries Used
-- **FastAPI:** Core web framework.
-- **SQLAlchemy:** ORM for database operations.
-- **Neon (PostgreSQL):** Cloud database for storing records.
-- **Passlib & Bcrypt:** For secure password hashing.
-- **Python-JOSE:** For encoding and decoding JWT tokens.
-- **Pandas:** To parse and process the admin's CSV/Excel rate files.
+```
+PriceGuard/
+├── backend/            # FastAPI backend
+├── admin_dashboard/    # Streamlit admin dashboard
+├── ai_engine/          # LSTM training pipeline & model artifacts
+├── mobile_app/         # React Native (Expo) mobile app
+└── docs/
+```
 
-## 📝 Key Workflows Implemented
-- **Database Dependency (`get_db`):** Ensures every API request safely opens and closes a connection to the Neon database.
-- **JWT Authentication (`get_current_user`):** Protects specific routes so only logged-in users can access them.
-- **Admin Verification (`get_admin_user`):** A secondary check ensuring that only users with the `admin` role can upload rate lists.
-- **Rate History Logic:** Instead of updating old rows or keeping a separate history table, the CSV upload endpoint inserts new rows into the `Official_Rates` table using the current date (`effective_date`). This naturally builds a historical timeline.
+## Setup — Backend
 
-## ⚠️ Important Considerations
-- Passwords are never stored in plain text.
-- The CSV upload feature assumes columns like `Item Name`, `Unit`, and `Price`. The backend must map these `Item Names` exactly to the `commodities` table IDs.
+**Prerequisites:** Python 3.11+, a PostgreSQL database (this project uses [Neon](https://neon.tech)), Tesseract OCR installed locally.
 
----
+```powershell
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
 
+Copy `.env.example` to `.env` and fill in your real values:
+
+```powershell
+copy .env.example .env
+```
+
+Required environment variables:
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SECRET_KEY` | JWT signing secret — generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `EMAIL_SENDER` | Gmail address used to send OTP verification emails |
+| `EMAIL_PASSWORD` | Gmail [App Password](https://support.google.com/accounts/answer/185833) (not your regular password) |
+| `TESSERACT_PATH` | Full path to your local Tesseract OCR executable |
+
+Run the backend:
+
+```powershell
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+API docs available at `http://localhost:8000/docs`.
+
+**Run tests:**
+
+```powershell
+pip install pytest
+pytest tests/ -v
+```
+
+## Setup — Admin Dashboard
+
+```powershell
+cd admin_dashboard
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Opens at `http://localhost:8501`. Requires the backend to be running — set the Backend URL on the login screen (defaults to `http://localhost:8000`).
+
+## Setup — Mobile App
+
+```powershell
+cd mobile_app
+npm install
+npx expo start
+```
+
+Update `BASE_URL` in `src/services/api.js` to match your backend's local network address (not `localhost`, since the app runs on a physical device/emulator). Scan the QR code with Expo Go, or run on an emulator.
+
+## Predictive Analytics — Training the Model
+
+```powershell
+cd ai_engine/predictive_analysis
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+python data_generator.py     # generates historical_prices.csv
+python train_model.py        # trains the LSTM, saves model artifacts
+python evaluate_model.py     # prints RMSE/MAE/MAPE per item
+```
+
+Copy the resulting model files (`priceguard_lstm.keras`, `item_scalers.joblib`, `model_config.joblib`, `historical_prices.csv`) into `backend/app/ml_artifacts/` for the backend's forecast endpoint to load them.
+
+## License
+
+Academic project — Final Year Project submission.

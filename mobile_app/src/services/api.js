@@ -4,6 +4,33 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const BASE_URL = "http://192.168.18.29:8000";
 
+// ------------------------------------------------------------------
+// FastAPI returns `detail` as a plain STRING for custom HTTPException
+// calls, but as an ARRAY of error objects for Pydantic validation
+// failures (422s). Passing an array straight into Alert.alert() crashes
+// the app natively ("Value for message cannot be cast from
+// ReadableNativeArray to String"). This always returns a safe string,
+// regardless of which shape the backend actually sent.
+// ------------------------------------------------------------------
+const extractErrorMessage = (data) => {
+    if (!data) return "Request failed";
+
+    if (typeof data.detail === "string") {
+        return data.detail;
+    }
+
+    if (Array.isArray(data.detail) && data.detail.length > 0) {
+        const first = data.detail[0];
+        let msg = (first && first.msg) || "Invalid input";
+        // Pydantic v2 prefixes custom field_validator messages with
+        // "Value error, " — strip it for a cleaner alert.
+        msg = msg.replace(/^Value error,\s*/, "");
+        return msg;
+    }
+
+    return "Request failed";
+};
+
 const buildHeaders = async (extraHeaders = {}) => {
     const token = await AsyncStorage.getItem("access_token");
     const headers = {
@@ -23,7 +50,16 @@ const handleResponse = async (response) => {
     const data = isJson ? await response.json() : await response.text();
 
     if (!response.ok) {
-        const error = new Error(data?.detail || "Request failed");
+        const message = extractErrorMessage(data);
+
+        // Normalize data.detail to the clean string too, so ANY code that
+        // reads err.response.data.detail directly (not just err.message)
+        // is also protected, not just callers that use api.js's own error.
+        if (data && typeof data === "object") {
+            data.detail = message;
+        }
+
+        const error = new Error(message);
         error.response = { status: response.status, data };
         throw error;
     }
@@ -42,6 +78,16 @@ const api = {
         const headers = await buildHeaders();
         const response = await fetch(`${BASE_URL}${path}`, {
             method: "POST",
+            headers,
+            body: JSON.stringify(body),
+        });
+        return handleResponse(response);
+    },
+
+    put: async (path, body) => {
+        const headers = await buildHeaders();
+        const response = await fetch(`${BASE_URL}${path}`, {
+            method: "PUT",
             headers,
             body: JSON.stringify(body),
         });
@@ -81,7 +127,7 @@ const api = {
         });
         return handleResponse(response);
     },
-    
+
     // Step 4c :
     postMultipart: async (path, fields, fileUri, fileFieldName = "file") => {
         const token = await AsyncStorage.getItem("access_token");
@@ -112,4 +158,4 @@ const api = {
 };
 
 export default api;
-export { BASE_URL };
+export { BASE_URL, extractErrorMessage };
