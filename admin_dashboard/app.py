@@ -18,7 +18,7 @@ st.set_page_config(
 # ============================================================
 # CONFIG
 # ============================================================
-DEFAULT_BASE_URL = "http://localhost:8000"
+DEFAULT_BASE_URL = "https://priceguard-vrpg.onrender.com"
 DEFAULT_HOARDING_THRESHOLD_PCT = 30  # reported price this much above model's expected price = alert
 
 if "base_url" not in st.session_state:
