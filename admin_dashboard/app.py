@@ -357,6 +357,37 @@ def fetch_complaints() -> tuple[bool, str]:
     return True, f"Loaded {len(df)} complaints."
 
 
+# ============================================================
+# NEW — BACKGROUND POLLING FOR NEW COMPLAINTS
+#
+# Uses st.fragment(run_every=...), a native Streamlit feature (available
+# since 1.33, well before this app's 1.51.0) that reruns just this function
+# on a timer WITHOUT resetting the whole page/session — unlike a browser
+# reload, login state and everything else stays intact.
+#
+# Only triggers a full app refresh (st.rerun()) when the complaint count
+# actually changed, so normal browsing/filtering isn't interrupted every
+# 15 seconds for no reason.
+# ============================================================
+@st.fragment(run_every=15)
+def poll_for_new_complaints():
+    if not st.session_state.access_token:
+        return  # not logged in yet, nothing to poll
+
+    previous_count = (
+        len(st.session_state.complaints_df)
+        if st.session_state.complaints_df is not None
+        else -1
+    )
+
+    ok, _ = fetch_complaints()  # updates st.session_state.complaints_df on success
+
+    if ok and st.session_state.complaints_df is not None:
+        new_count = len(st.session_state.complaints_df)
+        if new_count != previous_count:
+            st.rerun()
+
+
 def update_complaint_status(complaint_id: str, new_status: str, admin_note: str = "") -> tuple[bool, str, dict]:
     """
     Returns (success, message, debug_info). debug_info always contains the
@@ -941,6 +972,7 @@ def render_predictive_analytics_tab(full_df: pd.DataFrame):
 def main():
     inject_enterprise_theme()
     inject_complaint_selectbox_styling()
+    poll_for_new_complaints()  # NEW — background auto-refresh, no reload/relogin needed
 
     if not st.session_state.access_token:
         render_login()
