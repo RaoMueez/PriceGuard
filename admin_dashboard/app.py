@@ -654,13 +654,13 @@ def render_detail_tab(filtered_df: pd.DataFrame):
     img_col, data_col = st.columns([1, 1.2])
 
     with img_col:
-    st.markdown("**Receipt Image**")
-    image_url = f"{st.session_state.base_url}{row['receipt_image_url']}"
-    st.caption(image_url)  # TEMPORARY — shows exactly what URL is being requested
-    try:
-        st.image(image_url, width='stretch')
-    except Exception:
-        st.warning(f"Could not load image from {image_url}")
+        st.markdown("**Receipt Image**")
+        image_url = f"{st.session_state.base_url}{row['receipt_image_url']}"
+        st.caption(image_url)  # TEMPORARY — shows exactly what URL is being requested
+        try:
+            st.image(image_url, width='stretch')
+        except Exception:
+            st.warning(f"Could not load image from {image_url}")
 
     with data_col:
         st.markdown("**Price Comparison**")
