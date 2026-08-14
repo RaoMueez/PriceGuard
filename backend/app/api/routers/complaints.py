@@ -2,10 +2,12 @@
 
 import os
 import uuid
+import io
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session, joinedload
+from PIL import Image
 
 from app.db.session import get_db
 from app.models.models import Complaint, Commodity, Market, User, OfficialRate, ComplaintStatus
@@ -29,6 +31,34 @@ MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 MIN_QUANTITY = 0.01
 
 VALID_COMPLAINT_TYPES = {"overpricing", "short_weight"}
+
+# Longest side, in pixels, that a receipt image is downscaled to before any
+# processing. Phone camera photos are often 3000-4000px+ per side — every
+# OpenCV step (grayscale, threshold, dilate, Canny) allocates a full-size
+# array at that resolution, and combined with TensorFlow/Keras already
+# resident in memory for the forecast model, this was pushing Render's
+# free-tier 512MB limit and causing silent OOM restarts mid-request.
+# 1600px is plenty for OCR — Tesseract doesn't need 12-megapixel input.
+MAX_IMAGE_DIMENSION = 1600
+
+
+def _downscale_image_if_needed(image_bytes: bytes) -> bytes:
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        width, height = img.size
+        if max(width, height) <= MAX_IMAGE_DIMENSION:
+            return image_bytes
+        scale = MAX_IMAGE_DIMENSION / max(width, height)
+        new_size = (int(width * scale), int(height * scale))
+        img = img.convert("RGB").resize(new_size, Image.LANCZOS)
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=85)
+        return buffer.getvalue()
+    except Exception:
+        # If anything goes wrong here, don't block the whole submission over
+        # it — fall back to the original bytes and let downstream steps
+        # (the file-size check, OpenCV, OCR) handle whatever comes through.
+        return image_bytes
 
 
 def _get_latest_official_price(db: Session, commodity_id: int) -> float | None:
@@ -68,8 +98,8 @@ def is_underpriced_or_equal(reported_price: float, official_price: float | None)
     if official_price is None:
         return False
     return reported_price <= official_price
- 
- 
+
+
 def is_absurd_price(reported_price: float, official_price: float | None, multiplier: float) -> bool:
     """True if reported price is implausibly high relative to official (likely spam)."""
     if official_price is None:
@@ -167,6 +197,13 @@ def submit_complaint(
         raise HTTPException(status_code=404, detail="Market not found.")
 
     image_bytes = file.file.read()
+
+    # Downscale BEFORE the size check — a legitimately large phone photo
+    # (e.g. 7MB) gets shrunk first and likely passes on its processed size,
+    # rather than being rejected outright before we even tried to help it.
+    # This is also the main memory-pressure fix: every downstream step
+    # (OpenCV validation, OCR) now operates on a much smaller array.
+    image_bytes = _downscale_image_if_needed(image_bytes)
 
     if len(image_bytes) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
