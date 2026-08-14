@@ -58,3 +58,7 @@ def create_default_admin():
 @app.get("/")
 def root():
     return {"message": "PriceGuard API is running."}
+
+@app.head("/")
+async def root_head():
+    return {}
