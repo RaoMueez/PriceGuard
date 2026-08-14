@@ -2,7 +2,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const BASE_URL = "http://192.168.18.29:8000";
+const BASE_URL = "https://priceguard-vrpg.onrender.com";
 
 // ------------------------------------------------------------------
 // FastAPI returns `detail` as a plain STRING for custom HTTPException
