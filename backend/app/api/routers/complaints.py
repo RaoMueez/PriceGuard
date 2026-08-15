@@ -3,6 +3,8 @@
 import os
 import uuid
 import io
+import time
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -17,6 +19,8 @@ from app.services.ocr_service import process_receipt, process_handwritten_receip
 from app.services.image_validation_service import compute_receipt_authenticity
 from app.services.security_service import haversine_distance_km, check_shop_velocity, MAX_ALLOWED_DISTANCE_KM, VELOCITY_THRESHOLD
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
 
 UPLOAD_DIR = "app/uploads/receipts"
@@ -25,20 +29,10 @@ PRICE_MATCH_TOLERANCE_RS = 5.0
 ABSURD_PRICE_MULTIPLIER = 2.0
 MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
-# Smallest sane quantity a citizen could plausibly report (10 grams /
-# roughly 1 piece) — guards against division-by-near-zero producing an
-# absurd effective price from a typo like "0.001" instead of "0.1".
 MIN_QUANTITY = 0.01
 
 VALID_COMPLAINT_TYPES = {"overpricing", "short_weight"}
 
-# Longest side, in pixels, that a receipt image is downscaled to before any
-# processing. Phone camera photos are often 3000-4000px+ per side — every
-# OpenCV step (grayscale, threshold, dilate, Canny) allocates a full-size
-# array at that resolution, and combined with TensorFlow/Keras already
-# resident in memory for the forecast model, this was pushing Render's
-# free-tier 512MB limit and causing silent OOM restarts mid-request.
-# 1600px is plenty for OCR — Tesseract doesn't need 12-megapixel input.
 MAX_IMAGE_DIMENSION = 1600
 
 
@@ -55,9 +49,6 @@ def _downscale_image_if_needed(image_bytes: bytes) -> bytes:
         img.save(buffer, format="JPEG", quality=85)
         return buffer.getvalue()
     except Exception:
-        # If anything goes wrong here, don't block the whole submission over
-        # it — fall back to the original bytes and let downstream steps
-        # (the file-size check, OpenCV, OCR) handle whatever comes through.
         return image_bytes
 
 
@@ -72,17 +63,6 @@ def _get_latest_official_price(db: Session, commodity_id: int) -> float | None:
 
 
 def _normalize_effective_price(amount_paid: float, quantity: float) -> float:
-    """
-    Step 0 — turns "I paid X for Y quantity" (either scenario: bought a
-    fraction, or received short weight for a fixed payment) into a single
-    per-unit effective price, using the same formula for both cases:
-    effective_price = amount_paid / quantity.
-
-    This is the ONLY new logic — everything downstream (GPS, velocity,
-    OpenCV, Math Filter, absurd-price, OCR tampering) is completely
-    unchanged and operates on the resulting reported_price exactly as
-    it always has.
-    """
     if quantity is None or quantity < MIN_QUANTITY:
         raise HTTPException(
             status_code=400,
@@ -94,14 +74,12 @@ def _normalize_effective_price(amount_paid: float, quantity: float) -> float:
     return round(amount_paid / quantity, 2)
 
 def is_underpriced_or_equal(reported_price: float, official_price: float | None) -> bool:
-    """True if there's no violation at all — reported price isn't above official."""
     if official_price is None:
         return False
     return reported_price <= official_price
 
 
 def is_absurd_price(reported_price: float, official_price: float | None, multiplier: float) -> bool:
-    """True if reported price is implausibly high relative to official (likely spam)."""
     if official_price is None:
         return False
     return reported_price >= official_price * multiplier
@@ -168,14 +146,16 @@ def submit_complaint(
     commodity_id: int = Form(...),
     market_id: int = Form(...),
     shop_name: str = Form(default=""),
-    complaint_type: str = Form(...),      # "overpricing" | "short_weight"
-    amount_paid: float = Form(...),       # what the citizen actually paid, in Rs.
-    quantity: float = Form(...),          # bought (overpricing) or received (short_weight), in the commodity's official unit
+    complaint_type: str = Form(...),
+    amount_paid: float = Form(...),
+    quantity: float = Form(...),
     device_latitude: float | None = Form(default=None),
     device_longitude: float | None = Form(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    t_request_start = time.time()
+
     if not current_user.is_verified:
         raise HTTPException(status_code=403, detail="Please verify your email before submitting complaints.")
 
@@ -196,14 +176,17 @@ def submit_complaint(
     if not market:
         raise HTTPException(status_code=404, detail="Market not found.")
 
+    # ---- TIMING: file read (this includes waiting for the upload itself
+    # to finish arriving over the network — a slow mobile connection shows
+    # up here, not in any of the processing steps below) ----
+    t0 = time.time()
     image_bytes = file.file.read()
+    logger.info(f"[timing] file upload received: {time.time() - t0:.2f}s ({len(image_bytes)/1024:.0f} KB)")
 
-    # Downscale BEFORE the size check — a legitimately large phone photo
-    # (e.g. 7MB) gets shrunk first and likely passes on its processed size,
-    # rather than being rejected outright before we even tried to help it.
-    # This is also the main memory-pressure fix: every downstream step
-    # (OpenCV validation, OCR) now operates on a much smaller array.
+    # ---- TIMING: downscale ----
+    t0 = time.time()
     image_bytes = _downscale_image_if_needed(image_bytes)
+    logger.info(f"[timing] downscale: {time.time() - t0:.2f}s ({len(image_bytes)/1024:.0f} KB after)")
 
     if len(image_bytes) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
@@ -211,12 +194,6 @@ def submit_complaint(
             detail=f"Receipt image is too large ({len(image_bytes) / (1024*1024):.1f} MB). Maximum allowed is 5 MB."
     )
 
-    # ============================================================
-    # STEP 0 — NORMALIZE TO PER-UNIT EFFECTIVE PRICE (NEW)
-    # Both "bought a fraction" and "got short-weighed" reduce to the same
-    # formula here — reported_price from this point on is exactly what
-    # every downstream step has always expected: a per-unit price.
-    # ============================================================
     reported_price = _normalize_effective_price(amount_paid, quantity)
 
     triggered_flags: list[str] = [
@@ -230,44 +207,53 @@ def submit_complaint(
 
     def _save(status_: ComplaintStatus, extra_flags: list[str] = None):
         flags = triggered_flags + (extra_flags or [])
-        return _save_complaint(
+        result = _save_complaint(
             db, current_user, commodity_id, market_id, shop_name,
             reported_price, official_price, image_bytes,
             device_latitude, device_longitude, distance_km,
             flags, status_, complaint_type, amount_paid, quantity,
             ai_extracted_price=ai_extracted_price,
         )
+        logger.info(f"[timing] TOTAL request time: {time.time() - t_request_start:.2f}s -> status={status_.value}")
+        return result
 
     # ============================================================
     # STEP 1 — GPS / HAVERSINE DISTANCE CHECK
     # ============================================================
+    t0 = time.time()
     distance_km = None
     if device_latitude is not None and device_longitude is not None:
         distance_km = haversine_distance_km(
             device_latitude, device_longitude, market.latitude, market.longitude
         )
         if distance_km > MAX_ALLOWED_DISTANCE_KM:
+            logger.info(f"[timing] GPS check: {time.time() - t0:.2f}s (rejected)")
             return _save(
                 ComplaintStatus.suspicious_location_mismatch,
                 [f"location_mismatch: {round(distance_km, 2)}km from market"],
             )
     else:
         triggered_flags.append("location_not_provided")
+    logger.info(f"[timing] GPS check: {time.time() - t0:.2f}s")
 
     # ============================================================
     # STEP 2 — VELOCITY TRACKING (flag only)
     # ============================================================
+    t0 = time.time()
     is_coordinated_attack = False
     if shop_name and shop_name.strip():
         recent_count = check_shop_velocity(db, shop_name)
         if recent_count >= VELOCITY_THRESHOLD:
             is_coordinated_attack = True
             triggered_flags.append(f"velocity_alert: {recent_count} reports on this shop in 24h")
+    logger.info(f"[timing] velocity check: {time.time() - t0:.2f}s")
 
     # ============================================================
     # STEP 3 — FAKE IMAGE FILTER
     # ============================================================
+    t0 = time.time()
     authenticity = compute_receipt_authenticity(image_bytes)
+    logger.info(f"[timing] OpenCV authenticity check: {time.time() - t0:.2f}s")
     if not authenticity["is_likely_valid_receipt"]:
         return _save(
             ComplaintStatus.auto_rejected_invalid_image,
@@ -275,7 +261,7 @@ def submit_complaint(
         )
 
     # ============================================================
-    # STEP 4 — MATH FILTER (unchanged — operates on the NORMALIZED price)
+    # STEP 4 — MATH FILTER
     # ============================================================
     if is_underpriced_or_equal(reported_price, official_price):
         return _save(
@@ -291,18 +277,11 @@ def submit_complaint(
 
     # ============================================================
     # STEP 5 — OCR EXTRACTION & TAMPERING CHECK / HANDWRITTEN FALLBACK
-    #
-    # IMPORTANT CHANGE: OCR is compared against `amount_paid`, not the
-    # normalized `reported_price`. A real receipt shows the actual amount
-    # charged (or a per-unit price if itemized) — it has no way of
-    # "knowing" your self-reported quantity, so comparing OCR against the
-    # computed per-unit figure would produce false tampering flags on
-    # every fractional-quantity complaint. Comparing against amount_paid
-    # is what OCR can actually verify.
     # ============================================================
     commodity_name = commodity.name
     ocr_found_price = False
 
+    t0 = time.time()
     try:
         printed_result = process_receipt(image_bytes, [commodity_name])
         printed_item = printed_result.get("extracted_items", {}).get(commodity_name, {})
@@ -311,8 +290,10 @@ def submit_complaint(
             ocr_found_price = True
     except Exception:
         pass
+    logger.info(f"[timing] printed OCR pass: {time.time() - t0:.2f}s (found={ocr_found_price})")
 
     if not ocr_found_price:
+        t0 = time.time()
         try:
             handwritten_result = process_handwritten_receipt(image_bytes, [commodity_name])
             hw_item = handwritten_result.get("extracted_items", {}).get(commodity_name, {})
@@ -321,6 +302,7 @@ def submit_complaint(
                 ocr_found_price = True
         except Exception:
             pass
+        logger.info(f"[timing] handwritten OCR fallback pass: {time.time() - t0:.2f}s (found={ocr_found_price})")
 
     if ocr_found_price:
         if abs(ai_extracted_price - amount_paid) > PRICE_MATCH_TOLERANCE_RS:
