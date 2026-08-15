@@ -52,6 +52,24 @@ def _downscale_image_if_needed(image_bytes: bytes) -> bytes:
         return image_bytes
 
 
+def _validate_is_real_image(image_bytes: bytes) -> bool:
+    """
+    Defends against a spoofed Content-Type header — e.g. a .txt or .pdf
+    file uploaded with the Content-Type manually set to "image/jpeg". The
+    earlier `file.content_type.startswith("image/")` check only trusts what
+    the client CLAIMS the file is; this actually opens and verifies the
+    bytes themselves, catching a mismatch immediately with a clear message
+    instead of letting bad bytes silently fail several steps later inside
+    OpenCV (which would still catch it, just with a less specific error).
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img.verify()
+        return True
+    except Exception:
+        return False
+
+
 def _get_latest_official_price(db: Session, commodity_id: int) -> float | None:
     latest_rate = (
         db.query(OfficialRate)
@@ -143,12 +161,12 @@ def _save_complaint(
 @router.post("", response_model=ComplaintResponse, status_code=201)
 def submit_complaint(
     file: UploadFile = File(...),
-    commodity_id: int = Form(...),
-    market_id: int = Form(...),
+    commodity_id: int = Form(..., gt=0),
+    market_id: int = Form(..., gt=0),
     shop_name: str = Form(default=""),
     complaint_type: str = Form(...),
-    amount_paid: float = Form(...),
-    quantity: float = Form(...),
+    amount_paid: float = Form(..., gt=0),
+    quantity: float = Form(..., ge=MIN_QUANTITY),
     device_latitude: float | None = Form(default=None),
     device_longitude: float | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -182,6 +200,15 @@ def submit_complaint(
     t0 = time.time()
     image_bytes = file.file.read()
     logger.info(f"[timing] file upload received: {time.time() - t0:.2f}s ({len(image_bytes)/1024:.0f} KB)")
+
+    # NEW — verify the bytes are actually a real image, regardless of what
+    # Content-Type header the client claimed. Placed before downscale on
+    # purpose: downscale's own try/except silently returns bad bytes
+    # unchanged on failure, so without this check a spoofed file could
+    # slide all the way to Step 3 before finally being caught with a
+    # generic "Could not decode image" message.
+    if not _validate_is_real_image(image_bytes):
+        raise HTTPException(status_code=400, detail="The uploaded file is not a valid image. Please attach a real photo.")
 
     # ---- TIMING: downscale ----
     t0 = time.time()
@@ -300,8 +327,8 @@ def submit_complaint(
             if hw_item.get("price") is not None:
                 ai_extracted_price = hw_item["price"]
                 ocr_found_price = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Handwritten OCR fallback raised an exception: {e}")
         logger.info(f"[timing] handwritten OCR fallback pass: {time.time() - t0:.2f}s (found={ocr_found_price})")
 
     if ocr_found_price:

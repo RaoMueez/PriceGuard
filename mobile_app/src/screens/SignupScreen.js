@@ -52,7 +52,7 @@ export default function SignupScreen({ navigation }) {
     };
 
     const handleSignup = async () => {
-        if (!fullName || !email || !password) {
+        if (!fullName.trim() || !email.trim() || !password) {
             Alert.alert("Missing information", "Please fill in all required fields.");
             return;
         }
@@ -63,7 +63,7 @@ export default function SignupScreen({ navigation }) {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    full_name: fullName,
+                    full_name: fullName.trim(),
                     email,
                     phone_number: phone || null,
                     password,
