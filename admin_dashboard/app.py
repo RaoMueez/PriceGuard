@@ -686,7 +686,8 @@ def render_detail_tab(filtered_df: pd.DataFrame):
 
     with img_col:
         st.markdown("**Receipt Image**")
-        image_url = f"{st.session_state.base_url}{row['receipt_image_url']}"
+        raw_url = row['receipt_image_url']
+        image_url = raw_url if raw_url.startswith("http") else f"{st.session_state.base_url}{raw_url}"
         try:
             st.image(image_url, width='stretch')
         except Exception:

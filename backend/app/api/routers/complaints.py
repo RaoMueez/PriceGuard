@@ -1,7 +1,5 @@
 # app/api/routers/complaints.py
 
-import os
-import uuid
 import io
 import time
 import logging
@@ -18,12 +16,11 @@ from app.api.deps import get_current_user
 from app.services.ocr_service import process_receipt, process_handwritten_receipt
 from app.services.image_validation_service import compute_receipt_authenticity
 from app.services.security_service import haversine_distance_km, check_shop_velocity, MAX_ALLOWED_DISTANCE_KM, VELOCITY_THRESHOLD
+from app.services.cloud_storage_service import upload_receipt_image
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/complaints", tags=["Complaints"])
-
-UPLOAD_DIR = "app/uploads/receipts"
 
 PRICE_MATCH_TOLERANCE_RS = 5.0
 ABSURD_PRICE_MULTIPLIER = 2.0
@@ -103,14 +100,10 @@ def is_absurd_price(reported_price: float, official_price: float | None, multipl
     return reported_price >= official_price * multiplier
 
 def _save_receipt_image(image_bytes: bytes) -> str:
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}.jpg"
-    filepath = os.path.join(UPLOAD_DIR, filename)
-
-    with open(filepath, "wb") as f:
-        f.write(image_bytes)
-
-    return f"/uploads/receipts/{filename}"
+    # Uploaded to Cloudinary instead of local disk — Render's filesystem is
+    # ephemeral and wipes /app/uploads on every restart/redeploy, which was
+    # silently losing every previously-submitted receipt image.
+    return upload_receipt_image(image_bytes)
 
 
 def _save_complaint(
