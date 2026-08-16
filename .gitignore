@@ -13,7 +13,8 @@ npm-debug.log
 yarn-error.log
 
 # Streamlit
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 
 # AI models & data (usually large/binary — track separately if needed)
 ai_engine/models/*.pkl
