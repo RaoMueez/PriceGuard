@@ -6,6 +6,7 @@ import {
     Image, ScrollView, Alert, Modal, FlatList, ActivityIndicator
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImageManipulator from "expo-image-manipulator";
 import { useAppTheme } from "../context/ThemeContext";
 import { fetchMarkets } from "../services/marketsService";
 import { fetchRates } from "../services/ratesService";
@@ -20,6 +21,13 @@ const COMPLAINT_TYPES = [
 export default function ComplaintFormScreen({ route, navigation }) {
     const { theme } = useAppTheme();
     const { imageUri, deviceLatitude, deviceLongitude } = route.params;
+
+    // Compressed/resized version of the captured photo, used for both the
+    // OCR auto-detect call and the final submission — cuts upload time on
+    // slow mobile connections, since this happens client-side BEFORE
+    // anything is sent over the network. Starts equal to the original
+    // imageUri so nothing blocks on this finishing before it's used.
+    const [processedImageUri, setProcessedImageUri] = useState(imageUri);
 
     const [markets, setMarkets] = useState([]);
     const [commodities, setCommodities] = useState([]);
@@ -37,6 +45,24 @@ export default function ComplaintFormScreen({ route, navigation }) {
     const [commoditySearch, setCommoditySearch] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [ocrStatus, setOcrStatus] = useState(null);
+
+    useEffect(() => {
+        const compressImage = async () => {
+            try {
+                const result = await ImageManipulator.manipulateAsync(
+                    imageUri,
+                    [{ resize: { width: 1600 } }],
+                    { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+                );
+                setProcessedImageUri(result.uri);
+            } catch (err) {
+                // If compression fails for any reason, processedImageUri
+                // already defaults to the original imageUri — nothing else
+                // to do here, submission still works, just uncompressed.
+            }
+        };
+        compressImage();
+    }, [imageUri]);
 
     useEffect(() => {
         const loadOptions = async () => {
@@ -75,7 +101,7 @@ export default function ComplaintFormScreen({ route, navigation }) {
         // the total amount charged. It has no way to know the fractional
         // quantity the user is separately reporting, so it only ever
         // pre-fills Amount Paid, never Quantity.
-        const result = await extractPriceFromReceipt(imageUri, commodity.name);
+        const result = await extractPriceFromReceipt(processedImageUri, commodity.name);
 
         if (result.auto_detected && result.price !== null && result.price !== undefined) {
             setAmountPaid(String(result.price));
@@ -106,6 +132,12 @@ export default function ComplaintFormScreen({ route, navigation }) {
             return;
         }
 
+        const paidValue = parseFloat(amountPaid);
+        if (isNaN(paidValue) || paidValue <= 0) {
+            Alert.alert("Invalid amount", "Please enter a valid amount greater than 0.");
+            return;
+        }
+
         setSubmitting(true);
         try {
             await submitComplaint({
@@ -115,7 +147,7 @@ export default function ComplaintFormScreen({ route, navigation }) {
                 complaint_type: complaintType,
                 amount_paid: parseFloat(amountPaid),
                 quantity: qtyValue,
-                imageUri: imageUri,
+                imageUri: processedImageUri,
                 device_latitude: deviceLatitude,
                 device_longitude: deviceLongitude,
             });
@@ -306,6 +338,12 @@ export default function ComplaintFormScreen({ route, navigation }) {
             >
                 <Text style={styles.submitButtonText}>{submitting ? "Submitting..." : "Submit Report"}</Text>
             </TouchableOpacity>
+
+            {submitting && (
+                <Text style={{ color: theme.textSecondary, fontSize: 12, textAlign: "center", marginTop: -20, marginBottom: 24 }}>
+                    This can take 10–20 seconds while we verify your receipt.
+                </Text>
+            )}
 
             {/* Market selection modal with search */}
             <Modal visible={marketModalVisible} animationType="slide" transparent>

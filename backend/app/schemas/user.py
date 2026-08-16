@@ -57,6 +57,16 @@ class UserCreate(BaseModel):
             return None
         return normalize_pk_phone(v)
 
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Full name must be at least 2 characters.")
+        return v
+
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -115,3 +125,13 @@ class UserUpdate(BaseModel):
         if v is None or v == "":
             return None
         return normalize_pk_phone(v)
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Full name must be at least 2 characters.")
+        return v

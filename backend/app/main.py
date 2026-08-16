@@ -1,13 +1,14 @@
 # app/main.py
 
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.api.routers import users, admin, rates, markets, complaints, ocr_test, forecast
 from app.db.session import SessionLocal
 from app.models.models import User, UserRole
 from app.core.security import hash_password
-from fastapi.staticfiles import StaticFiles
 from app.core.logging_config import setup_logging
 setup_logging()
 
@@ -21,7 +22,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/uploads", StaticFiles(directory="app/uploads"), name="uploads")
+UPLOADS_ROOT = "app/uploads"
+
+@app.get("/uploads/{subpath:path}")
+def serve_upload(subpath: str):
+    filepath = os.path.join(UPLOADS_ROOT, subpath)
+
+    # Guard against path traversal (e.g. subpath = "../../etc/passwd")
+    if not os.path.abspath(filepath).startswith(os.path.abspath(UPLOADS_ROOT)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    response = FileResponse(filepath)  # infers Content-Type from file extension
+    response.headers["Cache-Control"] = "no-store"  # never triggers a bare 304 response
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
         #--Routers--
 app.include_router(users.router)
