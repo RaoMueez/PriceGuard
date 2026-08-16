@@ -471,6 +471,70 @@ def update_complaint_status(complaint_id: str, new_status: str, admin_note: str 
     return True, "Status updated.", debug_info
 
 
+# ============================================================
+# NEW — OFFICIAL RATE LIST UPLOAD
+#
+# Same (success, message, debug_info) convention as update_complaint_status
+# above, kept identical to app.py's version for consistency between the
+# two dashboard entry points.
+# ============================================================
+def upload_official_rate_list(uploaded_file) -> tuple[bool, str, dict]:
+    """
+    Uploads a CSV/Excel official rate list to POST /api/admin/upload-rates.
+    """
+    debug_info = {"filename": uploaded_file.name}
+
+    files = {
+        "file": (
+            uploaded_file.name,
+            uploaded_file.getvalue(),
+            uploaded_file.type or "application/octet-stream",
+        )
+    }
+
+    try:
+        resp = requests.post(
+            f"{st.session_state.base_url}/api/admin/upload-rates",
+            headers=api_headers(),
+            files=files,
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as e:
+        debug_info["error"] = str(e)
+        return False, f"Could not reach backend — {e}", debug_info
+
+    debug_info["http_status_code"] = resp.status_code
+    try:
+        debug_info["response_body"] = resp.json()
+    except Exception:
+        debug_info["response_body"] = resp.text
+
+    if resp.status_code == 401:
+        st.session_state.access_token = None
+        return False, "Session expired — please log in again.", debug_info
+
+    if resp.status_code == 403:
+        return False, "This account does not have admin privileges.", debug_info
+
+    if resp.status_code != 200:
+        body = debug_info["response_body"]
+        detail = body.get("detail") if isinstance(body, dict) else resp.text
+        return False, f"Upload rejected ({resp.status_code}): {detail}", debug_info
+
+    body = debug_info["response_body"]
+    total = body.get("total_rows_processed", 0)
+    inserted = body.get("rates_inserted", 0)
+    skipped = body.get("skipped_items", [])
+    effective_date = body.get("effective_date", "today")
+
+    message = f"Processed {total} row(s) — {inserted} rate(s) saved for {effective_date}."
+    if skipped:
+        message += f" {len(skipped)} row(s) skipped."
+    debug_info["skipped_items"] = skipped
+
+    return True, message, debug_info
+
+
 def render_login():
     st.markdown('<div class="pg-content">', unsafe_allow_html=True)
     st.subheader("🔐 Admin Login")
@@ -535,8 +599,46 @@ def render_sidebar(df: pd.DataFrame) -> pd.DataFrame:
 # ============================================================
 # LIVE DASHBOARD TABS
 # ============================================================
+def render_rate_upload_section():
+    st.subheader("📤 Upload Official Rate List")
+    st.caption(
+        "File must be .csv or .xlsx with columns: **Item Name**, **Unit**, **Price**. "
+        "Uploading today's rates again will update, not duplicate, existing entries."
+    )
+
+    with st.form("rate_upload_form", clear_on_submit=True):
+        uploaded_file = st.file_uploader(
+            "Select rate list file",
+            type=["csv", "xlsx"],
+            accept_multiple_files=False,
+        )
+        submitted = st.form_submit_button("Upload", width="stretch")
+
+    if submitted:
+        if uploaded_file is None:
+            st.warning("Please select a CSV or Excel file before clicking Upload.")
+            return
+
+        with st.spinner(f"Uploading and processing {uploaded_file.name}..."):
+            ok, message, debug_info = upload_official_rate_list(uploaded_file)
+
+        if ok:
+            st.success(message)
+            if debug_info.get("skipped_items"):
+                with st.expander(f"⚠️ {len(debug_info['skipped_items'])} row(s) skipped — click to see why"):
+                    for item in debug_info["skipped_items"]:
+                        st.write(f"- {item}")
+        else:
+            st.error(message)
+
+    st.divider()
+
+
 def render_overview_tab(full_df: pd.DataFrame, filtered_df: pd.DataFrame):
     st.subheader("Overview")
+
+    render_rate_upload_section()   # NEW
+
     total = len(full_df)
     pending_count = (full_df["status_category"] == "Pending").sum()
     verified_count = (full_df["status_category"] == "Verified").sum()
